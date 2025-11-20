@@ -45,7 +45,6 @@
     th, td { border: 1px solid #ddd; padding: 4px 6px; }
     th { background: #f0f0f0; }
     .text-right { text-align: right; }
-    .text-center { text-align: center; }
     .note { font-size: 11px; color: #555; line-height: 1.5; }
     .error { color: #c62828; font-size: 12px; }
     .success { color: #2e7d32; font-size: 12px; }
@@ -401,12 +400,12 @@
       <form id="project-form" class="no-print">
         <div class="form-row">
           <div>
-            <label>取引先名<br>
+            <label>取引先（契約相手）<br>
               <input type="text" id="pj-client" required>
             </label>
           </div>
           <div>
-            <label>現場名<br>
+            <label>元請/現場名<br>
               <input type="text" id="pj-site" required>
             </label>
           </div>
@@ -416,7 +415,8 @@
             </label>
           </div>
         </div>
-        <button type="submit" class="primary">工事情報を登録</button>
+        <button type="submit" class="primary" id="pj-submit-btn">工事情報を登録</button>
+        <button type="button" class="secondary" id="pj-cancel-edit" style="display:none;">編集をキャンセル</button>
         <span id="pj-message"></span>
       </form>
     </div>
@@ -432,11 +432,13 @@
       <table id="project-table">
         <thead>
           <tr>
-            <th>取引先</th><th>現場</th>
+            <th>取引先（契約相手）</th>
+            <th>元請/現場名</th>
             <th class="text-right">契約金額</th>
             <th class="text-right">入金累計</th>
             <th class="text-right">経費累計</th>
             <th class="text-right">粗利益</th>
+            <th class="no-print">操作</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -558,12 +560,25 @@
         ※ ブラウザのローカルストレージに保存されたデータをすべて削除します。<br>
         ※ GitHub Pages などで公開している場合も、利用者ごとにブラウザ内に保存されます。
       </div>
+
+      <h3>バックアップ / 復元</h3>
+      <div class="no-print" style="margin-bottom:6px;">
+        <button class="secondary" id="btn-export-backup">バックアップデータをダウンロード</button>
+      </div>
+      <div class="no-print" style="margin-bottom:4px;">
+        <input type="file" id="backup-file" accept="application/json">
+        <button class="secondary" id="btn-import-backup">選択したバックアップを復元</button>
+      </div>
+      <span id="backup-message"></span>
+      <div class="note" style="margin-top:4px;">
+        ・バックアップファイル（JSON）をGoogleドライブ等に保存しておけば、別の端末でも同じデータを復元できます。<br>
+        ・復元すると、その端末のデータはバックアップの内容で<strong>上書き</strong>されます。
+      </div>
     </div>
   </section>
 </main>
 
 <script>
-  // --- データ定義とストレージ ---
   const STORAGE_KEY = 'kb_app_data_v2';
 
   const defaultCategories = [
@@ -588,7 +603,7 @@
     { name: '租税公課', type: 'expense' },
     { name: '雑費', type: 'expense' },
     { name: '減価償却費（非現金）', type: 'expense' },
-    { name: '資金振替', type: 'other' } // 振替専用、集計には含めない
+    { name: '資金振替', type: 'other' }
   ];
 
   const defaultAssetTypes = [
@@ -613,9 +628,9 @@
     depreciatedYears: [],
     accounts: {
       cashInitial: 0,
-      banks: [] // {id, name, initialBalance}
+      banks: []
     },
-    businessRatios: {} // { categoryName: percent }
+    businessRatios: {}
   };
 
   function loadData() {
@@ -634,8 +649,12 @@
     if (!appData.accounts) appData.accounts = { cashInitial: 0, banks: [] };
     if (!appData.accounts.banks) appData.accounts.banks = [];
     if (!appData.businessRatios) appData.businessRatios = {};
+    if (!appData.masters) appData.masters = { clients: [], descriptions: [] };
+    if (!Array.isArray(appData.transactions)) appData.transactions = [];
+    if (!Array.isArray(appData.projects)) appData.projects = [];
+    if (!Array.isArray(appData.assets)) appData.assets = [];
 
-    // 旧バージョンから来た場合、「普通預金」の口座を自動生成
+    // 旧バージョンから移行用：「普通預金」が使われているのに口座登録がない場合に自動追加
     const usedOrdinary = appData.transactions.some(t => t.account === '普通預金');
     const hasOrdinary = appData.accounts.banks.some(b => b.name === '普通預金');
     if (usedOrdinary && !hasOrdinary) {
@@ -664,7 +683,6 @@
     return `${y}-${m}-${day}`;
   }
 
-  // CSVヘルパー
   function toCSV(rows) {
     const esc = v => {
       if (v == null) v = '';
@@ -678,7 +696,7 @@
   }
 
   function downloadCSV(filename, rows) {
-    const csv = '\uFEFF' + toCSV(rows); // BOM付きUTF-8
+    const csv = '\uFEFF' + toCSV(rows);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -690,7 +708,7 @@
     URL.revokeObjectURL(url);
   }
 
-  // --- タブ切り替え ---
+  // タブ切り替え
   document.querySelectorAll('#tabs button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#tabs button').forEach(b => b.classList.remove('active'));
@@ -700,7 +718,10 @@
     });
   });
 
-  // --- 初期描画 ---
+  function getCategoryMeta(name) {
+    return appData.categories.find(c => c.name === name) || { name, type: 'other' };
+  }
+
   function initCategorySelect() {
     const sel = document.getElementById('tx-category');
     const journalCat = document.getElementById('journal-category');
@@ -812,6 +833,12 @@
     });
   }
 
+  function getProjectLabel(id) {
+    if (!id) return '';
+    const p = appData.projects.find(p => p.id === id);
+    return p ? `${p.client}／${p.site}` : '';
+  }
+
   function refreshProjectSelectOnTx() {
     const sel = document.getElementById('tx-project');
     const cur = sel.value;
@@ -833,7 +860,6 @@
     recent.forEach(t => {
       const tr = document.createElement('tr');
 
-      // 入金＝資産増（緑）、出金＝資産減（赤）
       if (t.inout === '入金') {
         tr.classList.add('asset-up');
       } else if (t.inout === '出金') {
@@ -854,17 +880,7 @@
     });
   }
 
-  function getCategoryMeta(name) {
-    return appData.categories.find(c => c.name === name) || { name, type: 'other' };
-  }
-
-  function getProjectLabel(id) {
-    if (!id) return '';
-    const p = appData.projects.find(p => p.id === id);
-    return p ? `${p.client}／${p.site}` : '';
-  }
-
-  // --- 仕訳一覧（フィルタ＋編集・削除） ---
+  // 仕訳一覧フィルタ＋描画
   function getFilteredTransactionsForJournal() {
     const yearVal = parseInt(document.getElementById('journal-year').value, 10);
     const monthVal = document.getElementById('journal-month').value;
@@ -894,7 +910,6 @@
     data.forEach(t => {
       const tr = document.createElement('tr');
 
-      // 入金＝資産増、出金＝資産減（非現金も区分が付いていれば色は付く）
       if (t.inout === '入金') {
         tr.classList.add('asset-up');
       } else if (t.inout === '出金') {
@@ -923,8 +938,8 @@
     tbody.querySelectorAll('.btn-edit-tx').forEach(btn => {
       btn.addEventListener('click', () => {
         startEditTransaction(btn.dataset.id);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
         document.querySelector('#tabs button[data-tab="tab-cash"]').click();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
     tbody.querySelectorAll('.btn-delete-tx').forEach(btn => {
@@ -934,7 +949,7 @@
     });
   }
 
-  // --- 科目別集計 ---
+  // 科目別集計
   function renderSummary() {
     const yearInput = document.getElementById('sum-year');
     let year = parseInt(yearInput.value, 10);
@@ -956,7 +971,7 @@
 
     appData.transactions.forEach(t => {
       if (!t.date || t.date.length < 4) return;
-      if (t.isTransfer) return;     // 振替は損益に含めない
+      if (t.isTransfer) return;
       const y = parseInt(t.date.slice(0,4),10);
       if (y !== year) return;
       const catMeta = getCategoryMeta(t.category);
@@ -1022,7 +1037,9 @@
     });
   }
 
-  // --- 工事台帳 ---
+  // 工事台帳
+  let editingProjectId = null;
+
   function renderProjects() {
     const tbody = document.querySelector('#project-table tbody');
     tbody.innerHTML = '';
@@ -1050,12 +1067,48 @@
         <td class="text-right">${formatYen(incomeSum)}</td>
         <td class="text-right">${formatYen(expenseSum)}</td>
         <td class="text-right">${formatYen(gross)}</td>
+        <td class="no-print button-cell">
+          <button class="secondary btn-edit-project" data-id="${p.id}">編集</button>
+        </td>
       `;
       tbody.appendChild(tr);
     });
+
+    tbody.querySelectorAll('.btn-edit-project').forEach(btn => {
+      btn.addEventListener('click', () => {
+        startEditProject(btn.dataset.id);
+        document.querySelector('#tabs button[data-tab="tab-projects"]').click();
+      });
+    });
   }
 
-  // --- 固定資産の減価償却計算 ---
+  function startEditProject(id) {
+    const pj = appData.projects.find(p => p.id === id);
+    if (!pj) return;
+    editingProjectId = id;
+    document.getElementById('pj-client').value = pj.client;
+    document.getElementById('pj-site').value = pj.site;
+    document.getElementById('pj-amount').value = pj.contractAmount;
+    document.getElementById('pj-submit-btn').textContent = '工事情報を更新';
+    document.getElementById('pj-cancel-edit').style.display = 'inline-block';
+    const msg = document.getElementById('pj-message');
+    msg.textContent = '工事情報の編集モードです。この内容で上書きできます。';
+    msg.className = 'success';
+  }
+
+  function cancelEditProject() {
+    editingProjectId = null;
+    document.getElementById('pj-client').value = '';
+    document.getElementById('pj-site').value = '';
+    document.getElementById('pj-amount').value = '';
+    document.getElementById('pj-submit-btn').textContent = '工事情報を登録';
+    document.getElementById('pj-cancel-edit').style.display = 'none';
+    const msg = document.getElementById('pj-message');
+    msg.textContent = '';
+    msg.className = '';
+  }
+
+  // 固定資産（減価償却）
   function calcAssetDepreciation(asset, year) {
     const acq = new Date(asset.date);
     if (isNaN(acq.getTime())) return { depThisYear: 0, remaining: asset.cost, cumDep: 0 };
@@ -1115,7 +1168,6 @@
     return total;
   }
 
-  // Aプラン：新しい年になって初めて開いたときに、前年分を自動計上
   function autoDepreciatePreviousYearIfNeeded() {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -1148,7 +1200,7 @@
     saveData();
   }
 
-  // --- 現金・預金残高計算 ---
+  // 残高管理
   function computeBalancesForYear(year) {
     let cashIn = 0;
     let cashOut = 0;
@@ -1166,7 +1218,7 @@
 
     appData.transactions.forEach(t => {
       if (!t.date || t.date.length < 4) return;
-      if (t.isNonCash) return; // 非現金は除外
+      if (t.isNonCash) return;
       const y = parseInt(t.date.slice(0,4),10);
       if (y !== year) return;
 
@@ -1233,7 +1285,7 @@
     });
   }
 
-  // --- 取引 編集・削除ロジック ---
+  // 取引 編集・削除
   let editingTxId = null;
 
   function startEditTransaction(id) {
@@ -1292,9 +1344,8 @@
     renderBalanceManagement();
   }
 
-  // --- イベント登録 ---
+  // イベント
   function initEvents() {
-    // 入出金フォーム
     document.getElementById('tx-date').value = todayISO();
     document.getElementById('tr-date').value = todayISO();
 
@@ -1368,7 +1419,6 @@
       cancelEditTransaction();
     });
 
-    // 資金振替フォーム
     document.getElementById('transfer-form').addEventListener('submit', e => {
       e.preventDefault();
       const date = document.getElementById('tr-date').value;
@@ -1432,12 +1482,10 @@
       renderBalanceManagement();
     });
 
-    // 科目集計更新
     document.getElementById('btn-recalc-summary').addEventListener('click', () => {
       renderSummary();
     });
 
-    // 工事登録
     document.getElementById('project-form').addEventListener('submit', e => {
       e.preventDefault();
       const client = document.getElementById('pj-client').value.trim();
@@ -1445,15 +1493,32 @@
       const amount = parseInt(document.getElementById('pj-amount').value, 10) || 0;
       const msg = document.getElementById('pj-message');
       if (!client || !site) {
-        msg.textContent = '取引先名と現場名は必須です。';
+        msg.textContent = '取引先（契約相手）と元請/現場名は必須です。';
         msg.className = 'error';
         return;
       }
-      const pj = {
-        id: 'pj-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-        client, site, contractAmount: amount
-      };
-      appData.projects.push(pj);
+
+      if (editingProjectId) {
+        const pj = appData.projects.find(p => p.id === editingProjectId);
+        if (pj) {
+          pj.client = client;
+          pj.site = site;
+          pj.contractAmount = amount;
+        }
+        editingProjectId = null;
+        document.getElementById('pj-submit-btn').textContent = '工事情報を登録';
+        document.getElementById('pj-cancel-edit').style.display = 'none';
+        msg.textContent = '工事情報を更新しました。';
+        msg.className = 'success';
+      } else {
+        const pj = {
+          id: 'pj-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+          client, site, contractAmount: amount
+        };
+        appData.projects.push(pj);
+        msg.textContent = '工事を登録しました。';
+        msg.className = 'success';
+      }
 
       if (!appData.masters.clients.includes(client)) {
         appData.masters.clients.push(client);
@@ -1464,14 +1529,15 @@
       refreshProjectSelectOnTx();
       renderProjects();
 
-      msg.textContent = '工事を登録しました。';
-      msg.className = 'success';
       document.getElementById('pj-client').value = '';
       document.getElementById('pj-site').value = '';
       document.getElementById('pj-amount').value = '';
     });
 
-    // 固定資産：分類に応じて耐用年数を自動セット
+    document.getElementById('pj-cancel-edit').addEventListener('click', () => {
+      cancelEditProject();
+    });
+
     document.getElementById('asset-type').addEventListener('change', e => {
       const t = appData.assetTypes.find(a => a.name === e.target.value);
       if (t) {
@@ -1479,7 +1545,6 @@
       }
     });
 
-    // 固定資産登録
     document.getElementById('asset-form').addEventListener('submit', e => {
       e.preventDefault();
       const type = document.getElementById('asset-type').value;
@@ -1516,13 +1581,11 @@
       document.getElementById('asset-pool').checked = false;
     });
 
-    // 固定資産：年変更
     document.getElementById('btn-refresh-assets').addEventListener('click', e => {
       e.preventDefault();
       renderAssets();
     });
 
-    // マスタ追加
     document.getElementById('btn-add-master-client').addEventListener('click', () => {
       const v = document.getElementById('master-client-input').value.trim();
       if (v && !appData.masters.clients.includes(v)) {
@@ -1542,19 +1605,16 @@
       }
     });
 
-    // 全データ削除
     document.getElementById('btn-clear-all').addEventListener('click', () => {
       if (!confirm('本当に全データを削除しますか？元に戻せません。')) return;
       localStorage.removeItem(STORAGE_KEY);
       location.reload();
     });
 
-    // 残高管理：年更新
     document.getElementById('btn-refresh-balance').addEventListener('click', () => {
       renderBalanceManagement();
     });
 
-    // 預金口座登録
     document.getElementById('bank-form').addEventListener('submit', e => {
       e.preventDefault();
       const name = document.getElementById('bank-name').value.trim();
@@ -1584,7 +1644,6 @@
       renderBalanceManagement();
     });
 
-    // 仕訳一覧フィルタ
     document.getElementById('journal-year').addEventListener('change', renderJournal);
     document.getElementById('journal-month').addEventListener('change', renderJournal);
     document.getElementById('journal-category').addEventListener('change', renderJournal);
@@ -1599,13 +1658,11 @@
       renderJournal();
     });
 
-    // 印刷ボタン
     document.getElementById('btn-print-journal').addEventListener('click', () => window.print());
     document.getElementById('btn-print-summary').addEventListener('click', () => window.print());
     document.getElementById('btn-print-projects').addEventListener('click', () => window.print());
     document.getElementById('btn-print-assets').addEventListener('click', () => window.print());
 
-    // CSV出力ボタン
     document.getElementById('btn-export-journal-csv').addEventListener('click', () => {
       const data = getFilteredTransactionsForJournal();
       const rows = [['日付','入出金区分','口座','科目','取引先','現場','摘要','金額','非現金','振替']];
@@ -1682,7 +1739,7 @@
 
     document.getElementById('btn-export-projects-csv').addEventListener('click', () => {
       const year = new Date().getFullYear();
-      const rows = [['取引先','現場','契約金額','入金累計','経費累計','粗利益']];
+      const rows = [['取引先（契約相手）','元請/現場名','契約金額','入金累計','経費累計','粗利益']];
       appData.projects.forEach(p => {
         let incomeSum = 0;
         let expenseSum = 0;
@@ -1729,7 +1786,105 @@
       downloadCSV(`assets_${year}.csv`, rows);
     });
 
-    // 初期の年設定
+    // バックアップ出力
+    document.getElementById('btn-export-backup').addEventListener('click', () => {
+      const msg = document.getElementById('backup-message');
+      try {
+        const dataStr = JSON.stringify(appData);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = ('0' + (now.getMonth()+1)).slice(-2);
+        const d = ('0' + now.getDate()).slice(-2);
+        const hh = ('0' + now.getHours()).slice(-2);
+        const mm = ('0' + now.getMinutes()).slice(-2);
+        const ss = ('0' + now.getSeconds()).slice(-2);
+        const filename = `kb_backup_${y}${m}${d}_${hh}${mm}${ss}.json`;
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        msg.textContent = 'バックアップファイルを作成しました。クラウド等に保存してお使いください。';
+        msg.className = 'success';
+      } catch (e) {
+        console.error(e);
+        msg.textContent = 'バックアップの作成に失敗しました。';
+        msg.className = 'error';
+      }
+    });
+
+    // バックアップ復元
+    document.getElementById('btn-import-backup').addEventListener('click', () => {
+      const input = document.getElementById('backup-file');
+      const msg = document.getElementById('backup-message');
+      if (!input.files || !input.files[0]) {
+        msg.textContent = 'バックアップファイル（JSON）を選択してください。';
+        msg.className = 'error';
+        return;
+      }
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const obj = JSON.parse(e.target.result);
+          if (!obj || typeof obj !== 'object' || !Array.isArray(obj.transactions)) {
+            throw new Error('invalid');
+          }
+
+          appData = Object.assign({
+            transactions: [],
+            projects: [],
+            assets: [],
+            masters: { clients: [], descriptions: [] },
+            categories: defaultCategories,
+            assetTypes: defaultAssetTypes,
+            depreciatedYears: [],
+            accounts: { cashInitial: 0, banks: [] },
+            businessRatios: {}
+          }, obj);
+
+          if (!appData.categories) appData.categories = defaultCategories;
+          if (!appData.assetTypes) appData.assetTypes = defaultAssetTypes;
+          if (!appData.depreciatedYears) appData.depreciatedYears = [];
+          if (!appData.accounts) appData.accounts = { cashInitial: 0, banks: [] };
+          if (!appData.accounts.banks) appData.accounts.banks = [];
+          if (!appData.businessRatios) appData.businessRatios = {};
+          if (!appData.masters) appData.masters = { clients: [], descriptions: [] };
+          if (!Array.isArray(appData.transactions)) appData.transactions = [];
+          if (!Array.isArray(appData.projects)) appData.projects = [];
+          if (!Array.isArray(appData.assets)) appData.assets = [];
+
+          saveData();
+
+          initCategorySelect();
+          initAssetTypeSelect();
+          refreshAccountSelects();
+          refreshMastersUI();
+          refreshProjectSelectOnTx();
+          renderRecentTransactions();
+          renderJournal();
+          renderSummary();
+          renderProjects();
+          renderAssets();
+          renderBalanceManagement();
+
+          msg.textContent = 'バックアップデータを復元しました。この端末のデータは上書きされています。';
+          msg.className = 'success';
+        } catch (err) {
+          console.error(err);
+          msg.textContent = 'バックアップファイルの読み込みに失敗しました。形式が正しいか確認してください。';
+          msg.className = 'error';
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    });
+
     const nowYear = new Date().getFullYear();
     document.getElementById('sum-year').value = nowYear;
     document.getElementById('asset-year').value = nowYear;
@@ -1737,10 +1892,8 @@
     document.getElementById('journal-year').value = '';
   }
 
-  // --- 初期化 ---
   (function init() {
     loadData();
-    // 減価償却 自動計上（前年分）
     autoDepreciatePreviousYearIfNeeded();
 
     initCategorySelect();
@@ -1763,4 +1916,3 @@
 </script>
 </body>
 </html>
-
