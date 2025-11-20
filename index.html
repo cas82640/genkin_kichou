@@ -1,0 +1,1766 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>現金主義記帳アプリ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f5f5f5; }
+    header { background: #006b9f; color: #fff; padding: 10px 16px; }
+    header h1 { margin: 0; font-size: 18px; }
+    #tabs { display: flex; flex-wrap: wrap; background: #004f77; }
+    #tabs button {
+      border: none; padding: 8px 12px; cursor: pointer; background: #004f77;
+      color: #fff; font-size: 13px;
+    }
+    #tabs button.active { background: #ffffff; color: #004f77; font-weight: bold; }
+    main { padding: 10px 12px 40px; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .card {
+      background: #fff; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+    h2 { font-size: 16px; margin-top: 0; }
+    h3 { font-size: 14px; margin-top: 0; }
+    label { font-size: 13px; display: inline-block; margin: 4px 4px 2px 0; }
+    input, select, textarea {
+      font-size: 13px; padding: 4px 6px; margin: 2px 0 6px;
+      border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box;
+    }
+    input[type="number"] { text-align: right; }
+    textarea { width: 100%; min-height: 60px; }
+    .form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .form-row > div { flex: 1; min-width: 140px; }
+    button.primary {
+      background: #006b9f; color: #fff; border: none; padding: 6px 12px;
+      border-radius: 4px; cursor: pointer; font-size: 13px;
+    }
+    button.secondary {
+      background: #e0e0e0; color: #333; border: none; padding: 4px 10px;
+      border-radius: 4px; cursor: pointer; font-size: 12px;
+    }
+    button.primary:disabled { background: #9bb9c7; cursor: not-allowed; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 6px; }
+    th, td { border: 1px solid #ddd; padding: 4px 6px; }
+    th { background: #f0f0f0; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .note { font-size: 11px; color: #555; line-height: 1.5; }
+    .error { color: #c62828; font-size: 12px; }
+    .success { color: #2e7d32; font-size: 12px; }
+    .badge { display: inline-block; padding: 2px 6px; font-size: 10px; border-radius: 3px; background: #eee; margin-left: 4px; }
+    .badge.non-cash { background: #ffecb3; }
+    .button-cell button { margin: 0 2px; }
+    .toolbar { margin-bottom: 6px; display:flex; flex-wrap:wrap; gap:6px; align-items:flex-end; }
+    .toolbar > div { min-width:120px; }
+    .toolbar .secondary { padding:4px 8px; }
+    .toolbar .primary { padding:4px 8px; }
+
+    /* 資産増減の色分け */
+    tr.asset-up {      /* 入金（資産増） */
+      background: #e8f5e9;
+    }
+    tr.asset-down {    /* 出金（資産減） */
+      background: #ffebee;
+    }
+
+    /* 印刷用スタイル */
+    @media print {
+      header, #tabs, .no-print { display:none !important; }
+      body { background:#fff; }
+      .card { box-shadow:none; margin:0 0 8mm 0; page-break-inside: avoid; }
+      main { padding:0; }
+    }
+
+    @media (max-width: 640px) {
+      th, td { font-size: 11px; }
+      header h1 { font-size: 15px; }
+      #tabs button { font-size: 11px; padding: 6px 8px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>現金主義記帳アプリ（建設業向け・簡易版）</h1>
+</header>
+
+<nav id="tabs" class="no-print">
+  <button data-tab="tab-cash" class="active">入出金入力</button>
+  <button data-tab="tab-journal">仕訳一覧</button>
+  <button data-tab="tab-balance">残高管理</button>
+  <button data-tab="tab-summary">科目別集計</button>
+  <button data-tab="tab-projects">工事台帳</button>
+  <button data-tab="tab-assets">固定資産台帳</button>
+  <button data-tab="tab-masters">マスタ管理</button>
+</nav>
+
+<main>
+  <!-- 入出金入力 -->
+  <section id="tab-cash" class="tab-content active">
+    <div class="card">
+      <h2>入出金入力</h2>
+      <div class="note">
+        ・過去の取引の<strong>編集・削除</strong>は、上部メニューの<strong>「仕訳一覧」</strong>タブから行ってください。<br>
+        ・10万円以上の資産を購入した場合は、この画面ではなく<strong>「固定資産台帳」</strong>タブから登録してください。<br>
+        ・クレジットカード払いなど、現金・預金がすぐに動かない取引は、<strong>実際に口座残高が動いた日付</strong>で入力してください。
+      </div>
+      <form id="transaction-form">
+        <div class="form-row">
+          <div>
+            <label>日付<br>
+              <input type="date" id="tx-date" required>
+            </label>
+          </div>
+          <div>
+            <label>入出金区分<br>
+              <select id="tx-inout">
+                <option value="入金">入金</option>
+                <option value="出金">出金</option>
+              </select>
+            </label>
+          </div>
+          <div>
+            <label>現金 / 預金口座<br>
+              <select id="tx-account"></select>
+            </label>
+          </div>
+          <div>
+            <label>金額<br>
+              <input type="number" id="tx-amount" min="0" step="1" required>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label>科目<br>
+              <select id="tx-category"></select>
+            </label>
+          </div>
+          <div>
+            <label>取引先<br>
+              <input list="client-list" id="tx-client" autocomplete="off">
+              <datalist id="client-list"></datalist>
+            </label>
+          </div>
+          <div>
+            <label>工事（現場）<br>
+              <select id="tx-project">
+                <option value="">（未選択）</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label>摘要<br>
+            <input list="desc-list" id="tx-desc" style="width:100%;" autocomplete="off">
+            <datalist id="desc-list"></datalist>
+          </label>
+        </div>
+
+        <div style="margin-top:8px;">
+          <button type="submit" class="primary" id="tx-submit-btn">この内容で登録</button>
+          <button type="button" class="secondary" id="tx-cancel-edit" style="display:none;">編集をキャンセル</button>
+          <span id="tx-message" class=""></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>資金振替（現金⇔預金／預金⇔預金）</h3>
+      <form id="transfer-form">
+        <div class="form-row">
+          <div>
+            <label>日付<br>
+              <input type="date" id="tr-date" required>
+            </label>
+          </div>
+          <div>
+            <label>振替元口座<br>
+              <select id="tr-from-account"></select>
+            </label>
+          </div>
+          <div>
+            <label>振替先口座<br>
+              <select id="tr-to-account"></select>
+            </label>
+          </div>
+          <div>
+            <label>金額<br>
+              <input type="number" id="tr-amount" min="0" step="1" required>
+            </label>
+          </div>
+        </div>
+        <div>
+          <label>摘要（任意）<br>
+            <input type="text" id="tr-desc" style="width:100%;">
+          </label>
+        </div>
+        <div style="margin-top:6px;">
+          <button type="submit" class="secondary">資金振替として登録</button>
+          <span id="tr-message"></span>
+        </div>
+        <div class="note">
+          ・事業用の現金・預金間の単純な資金移動のみを対象としています。<br>
+          ・事業主貸・事業主借（プライベートとのやりとり）は対象外です。
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="form-row no-print" style="justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">最近の取引</h3>
+        <button type="button" class="secondary" onclick="window.print()">この一覧を印刷</button>
+      </div>
+      <div class="note">
+        ※ 行の色：<span style="background:#e8f5e9;">　</span> 入金（現金・預金が増える）／
+        <span style="background:#ffebee;">　</span> 出金（現金・預金が減る）
+      </div>
+      <table id="recent-tx-table">
+        <thead>
+          <tr>
+            <th>日付</th><th>区分</th><th>口座</th><th>科目</th>
+            <th>取引先</th><th>現場</th><th>摘要</th><th class="text-right">金額</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 仕訳一覧 -->
+  <section id="tab-journal" class="tab-content">
+    <div class="card">
+      <div class="form-row no-print" style="justify-content:space-between; align-items:center;">
+        <h2 style="margin:0;">仕訳一覧</h2>
+        <div>
+          <button class="secondary" id="btn-print-journal">印刷</button>
+          <button class="secondary" id="btn-export-journal-csv">CSV出力</button>
+        </div>
+      </div>
+
+      <div class="note">
+        ※ 行の色：緑＝入金（資産増）／赤＝出金（資産減）。減価償却など非現金仕訳は色なしです。
+      </div>
+
+      <div class="toolbar no-print">
+        <div>
+          <label>年（西暦）<br>
+            <input type="number" id="journal-year" min="2000" max="2100">
+          </label>
+        </div>
+        <div>
+          <label>月<br>
+            <select id="journal-month">
+              <option value="">全て</option>
+              <option value="1">1月</option>
+              <option value="2">2月</option>
+              <option value="3">3月</option>
+              <option value="4">4月</option>
+              <option value="5">5月</option>
+              <option value="6">6月</option>
+              <option value="7">7月</option>
+              <option value="8">8月</option>
+              <option value="9">9月</option>
+              <option value="10">10月</option>
+              <option value="11">11月</option>
+              <option value="12">12月</option>
+            </select>
+          </label>
+        </div>
+        <div>
+          <label>科目<br>
+            <select id="journal-category">
+              <option value="">全て</option>
+            </select>
+          </label>
+        </div>
+        <div>
+          <label>キーワード（取引先・摘要）<br>
+            <input type="text" id="journal-keyword">
+          </label>
+        </div>
+        <div>
+          <button class="secondary" id="btn-journal-clear">条件クリア</button>
+        </div>
+      </div>
+
+      <table id="journal-table">
+        <thead>
+          <tr>
+            <th>日付</th><th>区分</th><th>口座</th><th>科目</th>
+            <th>取引先</th><th>現場</th><th>摘要</th><th class="text-right">金額</th><th>種別</th><th class="no-print">操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 残高管理 -->
+  <section id="tab-balance" class="tab-content">
+    <div class="card">
+      <div class="form-row no-print" style="justify-content:space-between; align-items:center;">
+        <h2 style="margin:0;">現金・預金残高管理</h2>
+        <button class="secondary" onclick="window.print()">印刷</button>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label>対象年（西暦）<br>
+            <input type="number" id="balance-year" min="2000" max="2100">
+          </label>
+        </div>
+        <div style="align-self:flex-end;">
+          <button class="primary no-print" id="btn-refresh-balance">表示更新</button>
+        </div>
+      </div>
+
+      <h3>現金の今期の動き（1/1〜12/31）</h3>
+      <div id="cash-balance-display" style="font-size:13px; margin:4px 0 10px 0;"></div>
+
+      <hr>
+
+      <h3>預金口座</h3>
+      <form id="bank-form" class="no-print">
+        <div class="form-row">
+          <div>
+            <label>銀行名・口座名<br>
+              <input type="text" id="bank-name" required placeholder="例：〇〇銀行 普通">
+            </label>
+          </div>
+          <div>
+            <label>期首残高（初期残高）<br>
+              <input type="number" id="bank-initial" min="0" step="1" required>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="primary">預金口座を登録</button>
+        <span id="bank-message"></span>
+      </form>
+
+      <table id="bank-table">
+        <thead>
+          <tr>
+            <th>銀行名・口座名</th>
+            <th class="text-right">期首残高</th>
+            <th class="text-right">今期入金</th>
+            <th class="text-right">今期出金</th>
+            <th class="text-right">今期増減</th>
+            <th class="text-right">期末残高</th>
+            <th class="no-print">操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 科目別集計 -->
+  <section id="tab-summary" class="tab-content">
+    <div class="card">
+      <div class="form-row no-print" style="justify-content:space-between; align-items:center;">
+        <h2 style="margin:0;">科目別集計・事業用割合（科目ごと）</h2>
+        <div>
+          <button class="secondary" id="btn-print-summary">印刷</button>
+          <button class="secondary" id="btn-export-summary-csv">CSV出力</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label>対象年（西暦）<br>
+            <input type="number" id="sum-year" min="2000" max="2100">
+          </label>
+        </div>
+        <div style="align-self:flex-end;">
+          <button class="primary no-print" id="btn-recalc-summary">集計を更新</button>
+        </div>
+      </div>
+      <table id="summary-table">
+        <thead>
+          <tr>
+            <th>科目</th>
+            <th class="text-right">入金合計</th>
+            <th class="text-right">出金合計</th>
+            <th class="text-right">事業割合（％）</th>
+            <th class="text-right">事業経費（出金×事業割合）</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="profit-summary" style="margin-top:8px; font-size:13px;"></div>
+    </div>
+  </section>
+
+  <!-- 工事台帳 -->
+  <section id="tab-projects" class="tab-content">
+    <div class="card">
+      <h2>工事台帳</h2>
+      <form id="project-form" class="no-print">
+        <div class="form-row">
+          <div>
+            <label>取引先名<br>
+              <input type="text" id="pj-client" required>
+            </label>
+          </div>
+          <div>
+            <label>現場名<br>
+              <input type="text" id="pj-site" required>
+            </label>
+          </div>
+          <div>
+            <label>契約金額（税込）<br>
+              <input type="number" id="pj-amount" min="0" step="1" required>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="primary">工事情報を登録</button>
+        <span id="pj-message"></span>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="form-row no-print" style="justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">工事一覧・粗利益</h3>
+        <div>
+          <button class="secondary" id="btn-print-projects">印刷</button>
+          <button class="secondary" id="btn-export-projects-csv">CSV出力</button>
+        </div>
+      </div>
+      <table id="project-table">
+        <thead>
+          <tr>
+            <th>取引先</th><th>現場</th>
+            <th class="text-right">契約金額</th>
+            <th class="text-right">入金累計</th>
+            <th class="text-right">経費累計</th>
+            <th class="text-right">粗利益</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 固定資産台帳 -->
+  <section id="tab-assets" class="tab-content">
+    <div class="card">
+      <h2>固定資産台帳</h2>
+      <form id="asset-form" class="no-print">
+        <div class="form-row">
+          <div>
+            <label>資産分類<br>
+              <select id="asset-type"></select>
+            </label>
+          </div>
+          <div>
+            <label>資産名<br>
+              <input type="text" id="asset-name" required>
+            </label>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>取得日<br>
+              <input type="date" id="asset-date" required>
+            </label>
+          </div>
+          <div>
+            <label>取得金額<br>
+              <input type="number" id="asset-cost" min="0" step="1" required>
+            </label>
+          </div>
+          <div>
+            <label>耐用年数（年）<br>
+              <input type="number" id="asset-life" min="1" step="1" required>
+            </label>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>
+              <input type="checkbox" id="asset-pool">
+              一括償却資産（10〜20万円未満・3年償却）
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="primary">固定資産として登録</button>
+        <span id="asset-message"></span>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="form-row no-print" style="justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">固定資産一覧（今年度償却額と残高）</h3>
+        <div>
+          <button class="secondary" id="btn-print-assets">印刷</button>
+          <button class="secondary" id="btn-export-assets-csv">CSV出力</button>
+        </div>
+      </div>
+      <div class="note">※ 対象年はカレンダー年（1〜12月）で計算しています。</div>
+      <div style="margin:6px 0;" class="no-print">
+        <label>対象年（西暦）：<input type="number" id="asset-year" min="2000" max="2100"></label>
+        <button class="secondary" id="btn-refresh-assets">表示更新</button>
+      </div>
+      <table id="asset-table">
+        <thead>
+          <tr>
+            <th>資産分類</th><th>資産名</th><th>取得日</th>
+            <th class="text-right">取得価額</th>
+            <th class="text-right">耐用年数</th>
+            <th class="text-right">今年度償却額</th>
+            <th class="text-right">残高</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="note" style="margin-top:8px;">
+        ・各年の期末（12月31日）に、前年分の減価償却費が未計上であれば、自動的に「減価償却費（非現金）」として登録されます。<br>
+        ・自動計上済みの年は、二重に計上しないよう制御しています。
+      </div>
+    </div>
+  </section>
+
+  <!-- マスタ管理 -->
+  <section id="tab-masters" class="tab-content">
+    <div class="card">
+      <h2>マスタ管理</h2>
+
+      <h3>取引先マスタ</h3>
+      <div class="form-row no-print">
+        <div>
+          <input type="text" id="master-client-input" placeholder="取引先名を追加">
+        </div>
+        <div>
+          <button class="secondary" id="btn-add-master-client">追加</button>
+        </div>
+      </div>
+      <ul id="master-client-list" style="font-size:12px; padding-left:18px;"></ul>
+
+      <h3>摘要マスタ</h3>
+      <div class="form-row no-print">
+        <div>
+          <input type="text" id="master-desc-input" placeholder="摘要を追加">
+        </div>
+        <div>
+          <button class="secondary" id="btn-add-master-desc">追加</button>
+        </div>
+      </div>
+      <ul id="master-desc-list" style="font-size:12px; padding-left:18px;"></ul>
+
+      <h3>データ管理</h3>
+      <button class="secondary no-print" id="btn-clear-all">全データを削除（初期化）</button>
+      <span id="clear-message" class=""></span>
+      <div class="note" style="margin-top:4px;">
+        ※ ブラウザのローカルストレージに保存されたデータをすべて削除します。<br>
+        ※ GitHub Pages などで公開している場合も、利用者ごとにブラウザ内に保存されます。
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  // --- データ定義とストレージ ---
+  const STORAGE_KEY = 'kb_app_data_v2';
+
+  const defaultCategories = [
+    { name: '売上高', type: 'income' },
+    { name: '雑収入', type: 'income' },
+    { name: '材料仕入', type: 'expense' },
+    { name: '外注費', type: 'expense' },
+    { name: '給与賃金', type: 'expense' },
+    { name: '地代家賃', type: 'expense' },
+    { name: '水道光熱費', type: 'expense' },
+    { name: '旅費交通費', type: 'expense' },
+    { name: '通信費', type: 'expense' },
+    { name: '接待交際費', type: 'expense' },
+    { name: '損害保険料', type: 'expense' },
+    { name: '修繕費', type: 'expense' },
+    { name: '消耗品費', type: 'expense' },
+    { name: '福利厚生費', type: 'expense' },
+    { name: '車両関係費', type: 'expense' },
+    { name: 'ガソリン代', type: 'expense' },
+    { name: 'リース料', type: 'expense' },
+    { name: '廃材処理費', type: 'expense' },
+    { name: '租税公課', type: 'expense' },
+    { name: '雑費', type: 'expense' },
+    { name: '減価償却費（非現金）', type: 'expense' },
+    { name: '資金振替', type: 'other' } // 振替専用、集計には含めない
+  ];
+
+  const defaultAssetTypes = [
+    { name: '営業用乗用車', life: 6 },
+    { name: '軽トラック', life: 4 },
+    { name: '工具・器具備品', life: 5 },
+    { name: 'パソコン', life: 4 },
+    { name: '事務机・いす', life: 10 },
+    { name: '建物附属設備', life: 15 }
+  ];
+
+  let appData = {
+    transactions: [],
+    projects: [],
+    assets: [],
+    masters: {
+      clients: [],
+      descriptions: []
+    },
+    categories: defaultCategories,
+    assetTypes: defaultAssetTypes,
+    depreciatedYears: [],
+    accounts: {
+      cashInitial: 0,
+      banks: [] // {id, name, initialBalance}
+    },
+    businessRatios: {} // { categoryName: percent }
+  };
+
+  function loadData() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        const obj = JSON.parse(raw);
+        appData = Object.assign(appData, obj);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    if (!appData.categories) appData.categories = defaultCategories;
+    if (!appData.assetTypes) appData.assetTypes = defaultAssetTypes;
+    if (!appData.depreciatedYears) appData.depreciatedYears = [];
+    if (!appData.accounts) appData.accounts = { cashInitial: 0, banks: [] };
+    if (!appData.accounts.banks) appData.accounts.banks = [];
+    if (!appData.businessRatios) appData.businessRatios = {};
+
+    // 旧バージョンから来た場合、「普通預金」の口座を自動生成
+    const usedOrdinary = appData.transactions.some(t => t.account === '普通預金');
+    const hasOrdinary = appData.accounts.banks.some(b => b.name === '普通預金');
+    if (usedOrdinary && !hasOrdinary) {
+      appData.accounts.banks.push({
+        id: 'bank-ordinary',
+        name: '普通預金',
+        initialBalance: 0
+      });
+    }
+  }
+
+  function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+  }
+
+  function formatYen(n) {
+    if (n == null || isNaN(n)) return '';
+    return n.toLocaleString('ja-JP', { maximumFractionDigits: 0 });
+  }
+
+  function todayISO() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = ('0' + (d.getMonth() + 1)).slice(-2);
+    const day = ('0' + d.getDate()).slice(-2);
+    return `${y}-${m}-${day}`;
+  }
+
+  // CSVヘルパー
+  function toCSV(rows) {
+    const esc = v => {
+      if (v == null) v = '';
+      v = String(v);
+      if (v.includes('"') || v.includes(',') || v.includes('\n')) {
+        return '"' + v.replace(/"/g, '""') + '"';
+      }
+      return v;
+    };
+    return rows.map(r => r.map(esc).join(',')).join('\n');
+  }
+
+  function downloadCSV(filename, rows) {
+    const csv = '\uFEFF' + toCSV(rows); // BOM付きUTF-8
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // --- タブ切り替え ---
+  document.querySelectorAll('#tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#tabs button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(sec => sec.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // --- 初期描画 ---
+  function initCategorySelect() {
+    const sel = document.getElementById('tx-category');
+    const journalCat = document.getElementById('journal-category');
+    sel.innerHTML = '';
+    journalCat.innerHTML = '<option value="">全て</option>';
+    appData.categories.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name;
+      opt.textContent = c.name;
+      sel.appendChild(opt);
+
+      const opt2 = document.createElement('option');
+      opt2.value = c.name;
+      opt2.textContent = c.name;
+      journalCat.appendChild(opt2);
+    });
+  }
+
+  function initAssetTypeSelect() {
+    const sel = document.getElementById('asset-type');
+    sel.innerHTML = '';
+    appData.assetTypes.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.name;
+      opt.textContent = `${a.name}（耐用年数${a.life}年）`;
+      sel.appendChild(opt);
+    });
+  }
+
+  function refreshAccountSelects() {
+    const txSel = document.getElementById('tx-account');
+    const trFrom = document.getElementById('tr-from-account');
+    const trTo = document.getElementById('tr-to-account');
+
+    const fill = sel => {
+      const cur = sel.value;
+      sel.innerHTML = '';
+      const optCash = document.createElement('option');
+      optCash.value = '現金';
+      optCash.textContent = '現金';
+      sel.appendChild(optCash);
+      appData.accounts.banks.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.name;
+        opt.textContent = b.name;
+        sel.appendChild(opt);
+      });
+      if (cur) sel.value = cur;
+    };
+
+    fill(txSel);
+    fill(trFrom);
+    fill(trTo);
+  }
+
+  function refreshMastersUI() {
+    const dataList = document.getElementById('client-list');
+    dataList.innerHTML = '';
+    const allClients = new Set(appData.masters.clients);
+    appData.projects.forEach(p => allClients.add(p.client));
+    allClients.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      dataList.appendChild(opt);
+    });
+
+    const descList = document.getElementById('desc-list');
+    descList.innerHTML = '';
+    appData.masters.descriptions.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d;
+      descList.appendChild(opt);
+    });
+
+    const ulClients = document.getElementById('master-client-list');
+    ulClients.innerHTML = '';
+    appData.masters.clients.forEach((c, idx) => {
+      const li = document.createElement('li');
+      li.textContent = c + ' ';
+      const del = document.createElement('button');
+      del.textContent = '削除';
+      del.className = 'secondary no-print';
+      del.style.fontSize = '10px';
+      del.addEventListener('click', () => {
+        appData.masters.clients.splice(idx, 1);
+        saveData();
+        refreshMastersUI();
+      });
+      li.appendChild(del);
+      ulClients.appendChild(li);
+    });
+
+    const ulDesc = document.getElementById('master-desc-list');
+    ulDesc.innerHTML = '';
+    appData.masters.descriptions.forEach((d, idx) => {
+      const li = document.createElement('li');
+      li.textContent = d + ' ';
+      const del = document.createElement('button');
+      del.textContent = '削除';
+      del.className = 'secondary no-print';
+      del.style.fontSize = '10px';
+      del.addEventListener('click', () => {
+        appData.masters.descriptions.splice(idx, 1);
+        saveData();
+        refreshMastersUI();
+      });
+      li.appendChild(del);
+      ulDesc.appendChild(li);
+    });
+  }
+
+  function refreshProjectSelectOnTx() {
+    const sel = document.getElementById('tx-project');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">（未選択）</option>';
+    appData.projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.client}／${p.site}`;
+      sel.appendChild(opt);
+    });
+    if (cur) sel.value = cur;
+  }
+
+  function renderRecentTransactions() {
+    const tbody = document.querySelector('#recent-tx-table tbody');
+    tbody.innerHTML = '';
+    const sorted = [...appData.transactions].sort((a,b)=> a.date.localeCompare(b.date));
+    const recent = sorted.slice(-20).reverse();
+    recent.forEach(t => {
+      const tr = document.createElement('tr');
+
+      // 入金＝資産増（緑）、出金＝資産減（赤）
+      if (t.inout === '入金') {
+        tr.classList.add('asset-up');
+      } else if (t.inout === '出金') {
+        tr.classList.add('asset-down');
+      }
+
+      tr.innerHTML = `
+        <td>${t.date}</td>
+        <td>${t.inout || ''}</td>
+        <td>${t.account || ''}</td>
+        <td>${t.category || ''}</td>
+        <td>${t.client || ''}</td>
+        <td>${getProjectLabel(t.projectId) || ''}</td>
+        <td>${t.desc || ''}</td>
+        <td class="text-right">${formatYen(t.amount)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function getCategoryMeta(name) {
+    return appData.categories.find(c => c.name === name) || { name, type: 'other' };
+  }
+
+  function getProjectLabel(id) {
+    if (!id) return '';
+    const p = appData.projects.find(p => p.id === id);
+    return p ? `${p.client}／${p.site}` : '';
+  }
+
+  // --- 仕訳一覧（フィルタ＋編集・削除） ---
+  function getFilteredTransactionsForJournal() {
+    const yearVal = parseInt(document.getElementById('journal-year').value, 10);
+    const monthVal = document.getElementById('journal-month').value;
+    const catVal = document.getElementById('journal-category').value;
+    const kw = document.getElementById('journal-keyword').value.trim();
+
+    return [...appData.transactions].filter(t => {
+      if (!t.date || t.date.length < 10) return false;
+      const y = parseInt(t.date.slice(0,4),10);
+      const m = parseInt(t.date.slice(5,7),10);
+
+      if (yearVal && y !== yearVal) return false;
+      if (monthVal && m !== parseInt(monthVal,10)) return false;
+      if (catVal && t.category !== catVal) return false;
+      if (kw) {
+        const hay = (t.client || '') + ' ' + (t.desc || '');
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    }).sort((a,b)=> a.date.localeCompare(b.date));
+  }
+
+  function renderJournal() {
+    const tbody = document.querySelector('#journal-table tbody');
+    tbody.innerHTML = '';
+    const data = getFilteredTransactionsForJournal();
+    data.forEach(t => {
+      const tr = document.createElement('tr');
+
+      // 入金＝資産増、出金＝資産減（非現金も区分が付いていれば色は付く）
+      if (t.inout === '入金') {
+        tr.classList.add('asset-up');
+      } else if (t.inout === '出金') {
+        tr.classList.add('asset-down');
+      }
+
+      const nonCashBadge = t.isNonCash ? '<span class="badge non-cash">非現金</span>' : '';
+      tr.innerHTML = `
+        <td>${t.date}</td>
+        <td>${t.inout || '-'}</td>
+        <td>${t.account || '-'}</td>
+        <td>${t.category || ''}</td>
+        <td>${t.client || ''}</td>
+        <td>${getProjectLabel(t.projectId) || ''}</td>
+        <td>${t.desc || ''}</td>
+        <td class="text-right">${formatYen(t.amount)}</td>
+        <td>${nonCashBadge}</td>
+        <td class="button-cell no-print">
+          <button class="secondary btn-edit-tx" data-id="${t.id}">編集</button>
+          <button class="secondary btn-delete-tx" data-id="${t.id}">削除</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.btn-edit-tx').forEach(btn => {
+      btn.addEventListener('click', () => {
+        startEditTransaction(btn.dataset.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        document.querySelector('#tabs button[data-tab="tab-cash"]').click();
+      });
+    });
+    tbody.querySelectorAll('.btn-delete-tx').forEach(btn => {
+      btn.addEventListener('click', () => {
+        deleteTransaction(btn.dataset.id);
+      });
+    });
+  }
+
+  // --- 科目別集計 ---
+  function renderSummary() {
+    const yearInput = document.getElementById('sum-year');
+    let year = parseInt(yearInput.value, 10);
+    if (!year) {
+      year = new Date().getFullYear();
+      yearInput.value = year;
+    }
+
+    const rows = {};
+    appData.categories.forEach(c => {
+      rows[c.name] = { income: 0, expense: 0, type: c.type };
+      if (!appData.businessRatios.hasOwnProperty(c.name)) {
+        appData.businessRatios[c.name] = 100;
+      }
+    });
+
+    let incomeTotal = 0;
+    let expenseTotal = 0;
+
+    appData.transactions.forEach(t => {
+      if (!t.date || t.date.length < 4) return;
+      if (t.isTransfer) return;     // 振替は損益に含めない
+      const y = parseInt(t.date.slice(0,4),10);
+      if (y !== year) return;
+      const catMeta = getCategoryMeta(t.category);
+      if (!rows[t.category]) {
+        rows[t.category] = { income: 0, expense: 0, type: catMeta.type };
+        if (!appData.businessRatios.hasOwnProperty(t.category)) {
+          appData.businessRatios[t.category] = 100;
+        }
+      }
+      if (catMeta.type === 'income') {
+        rows[t.category].income += t.amount;
+        incomeTotal += t.amount;
+      } else if (catMeta.type === 'expense') {
+        rows[t.category].expense += t.amount;
+        expenseTotal += t.amount;
+      }
+    });
+
+    const tbody = document.querySelector('#summary-table tbody');
+    tbody.innerHTML = '';
+
+    let businessExpenseTotal = 0;
+    Object.keys(rows).forEach(catName => {
+      const r = rows[catName];
+      if (r.income === 0 && r.expense === 0) return;
+      const ratio = (appData.businessRatios[catName] != null ? appData.businessRatios[catName] : 100);
+      const businessExpense = r.expense * (ratio / 100);
+      businessExpenseTotal += businessExpense;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${catName}</td>
+        <td class="text-right">${formatYen(r.income)}</td>
+        <td class="text-right">${formatYen(r.expense)}</td>
+        <td class="text-right">
+          <input type="number" class="ratio-input no-print" data-category="${catName}"
+                 min="0" max="100" step="1" value="${ratio}" style="width:60px;">
+          <span class="only-print">${ratio}</span>
+        </td>
+        <td class="text-right">${formatYen(Math.round(businessExpense))}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    const profitElem = document.getElementById('profit-summary');
+    const profit = incomeTotal - businessExpenseTotal;
+    profitElem.textContent =
+      `対象年 ${year} の総収入合計：${formatYen(incomeTotal)}円　` +
+      `総経費合計：${formatYen(expenseTotal)}円　` +
+      `事業経費合計（割合適用後）：${formatYen(Math.round(businessExpenseTotal))}円　` +
+      `→ 事業所得（概算）：${formatYen(Math.round(profit))}円`;
+
+    tbody.querySelectorAll('.ratio-input').forEach(inp => {
+      inp.addEventListener('change', e => {
+        const cat = e.target.dataset.category;
+        let val = parseFloat(e.target.value);
+        if (isNaN(val)) val = 0;
+        val = Math.max(0, Math.min(100, val));
+        appData.businessRatios[cat] = val;
+        saveData();
+        renderSummary();
+      });
+    });
+  }
+
+  // --- 工事台帳 ---
+  function renderProjects() {
+    const tbody = document.querySelector('#project-table tbody');
+    tbody.innerHTML = '';
+    const year = new Date().getFullYear();
+    appData.projects.forEach(p => {
+      let incomeSum = 0;
+      let expenseSum = 0;
+      appData.transactions.forEach(t => {
+        if (t.projectId !== p.id) return;
+        const y = parseInt(t.date.slice(0,4), 10);
+        if (isNaN(y) || y !== year) return;
+        const catMeta = getCategoryMeta(t.category);
+        if (t.inout === '入金' && catMeta.type === 'income') {
+          incomeSum += t.amount;
+        } else if (t.inout === '出金' && catMeta.type === 'expense') {
+          expenseSum += t.amount;
+        }
+      });
+      const gross = incomeSum - expenseSum;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${p.client}</td>
+        <td>${p.site}</td>
+        <td class="text-right">${formatYen(p.contractAmount)}</td>
+        <td class="text-right">${formatYen(incomeSum)}</td>
+        <td class="text-right">${formatYen(expenseSum)}</td>
+        <td class="text-right">${formatYen(gross)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // --- 固定資産の減価償却計算 ---
+  function calcAssetDepreciation(asset, year) {
+    const acq = new Date(asset.date);
+    if (isNaN(acq.getTime())) return { depThisYear: 0, remaining: asset.cost, cumDep: 0 };
+    const acqYear = acq.getFullYear();
+    const acqMonth = acq.getMonth() + 1;
+    const cost = asset.cost;
+    const lifeYears = asset.lifeYears;
+    const totalMonths = lifeYears * 12;
+
+    function monthsUsedUntilYear(y) {
+      if (y < acqYear) return 0;
+      const yearsDiff = y - acqYear;
+      const months = yearsDiff * 12 + (12 - acqMonth + 1);
+      return Math.max(0, Math.min(months, totalMonths));
+    }
+
+    const monthsCurrent = monthsUsedUntilYear(year);
+    const monthsPrev = monthsUsedUntilYear(year - 1);
+    const cumDepCurrent = cost * (monthsCurrent / totalMonths);
+    const cumDepPrev = cost * (monthsPrev / totalMonths);
+    const depThisYear = Math.max(0, cumDepCurrent - cumDepPrev);
+    const remaining = Math.max(0, cost - cumDepCurrent);
+    return { depThisYear, remaining, cumDep: cumDepCurrent };
+  }
+
+  function renderAssets() {
+    const yearInput = document.getElementById('asset-year');
+    let year = parseInt(yearInput.value, 10);
+    if (!year) {
+      year = new Date().getFullYear();
+      yearInput.value = year;
+    }
+    const tbody = document.querySelector('#asset-table tbody');
+    tbody.innerHTML = '';
+    appData.assets.forEach(a => {
+      const { depThisYear, remaining } = calcAssetDepreciation(a, year);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${a.type}</td>
+        <td>${a.name}</td>
+        <td>${a.date}</td>
+        <td class="text-right">${formatYen(a.cost)}</td>
+        <td class="text-right">${a.lifeYears}</td>
+        <td class="text-right">${formatYen(Math.round(depThisYear))}</td>
+        <td class="text-right">${formatYen(Math.round(remaining))}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function calcTotalDepForYear(year) {
+    let total = 0;
+    appData.assets.forEach(a => {
+      const { depThisYear } = calcAssetDepreciation(a, year);
+      total += Math.round(depThisYear);
+    });
+    return total;
+  }
+
+  // Aプラン：新しい年になって初めて開いたときに、前年分を自動計上
+  function autoDepreciatePreviousYearIfNeeded() {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const lastYear = currentYear - 1;
+    if (lastYear < 2000) return;
+    if (appData.depreciatedYears.some(d => d.year === lastYear)) return;
+
+    const total = calcTotalDepForYear(lastYear);
+    if (total <= 0) {
+      appData.depreciatedYears.push({ year: lastYear, totalAmount: 0 });
+      saveData();
+      return;
+    }
+
+    const tx = {
+      id: 'tx-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+      date: `${lastYear}-12-31`,
+      inout: '',
+      account: '',
+      amount: total,
+      category: '減価償却費（非現金）',
+      client: '',
+      projectId: '',
+      desc: `${lastYear}年分減価償却費を自動計上`,
+      isNonCash: true,
+      isTransfer: false
+    };
+    appData.transactions.push(tx);
+    appData.depreciatedYears.push({ year: lastYear, totalAmount: total });
+    saveData();
+  }
+
+  // --- 現金・預金残高計算 ---
+  function computeBalancesForYear(year) {
+    let cashIn = 0;
+    let cashOut = 0;
+
+    const bankMap = {};
+    appData.accounts.banks.forEach(b => {
+      bankMap[b.name] = {
+        id: b.id,
+        name: b.name,
+        initialBalance: b.initialBalance || 0,
+        in: 0,
+        out: 0
+      };
+    });
+
+    appData.transactions.forEach(t => {
+      if (!t.date || t.date.length < 4) return;
+      if (t.isNonCash) return; // 非現金は除外
+      const y = parseInt(t.date.slice(0,4),10);
+      if (y !== year) return;
+
+      if (t.account === '現金') {
+        if (t.inout === '入金') cashIn += t.amount;
+        else if (t.inout === '出金') cashOut += t.amount;
+      } else if (bankMap[t.account]) {
+        if (t.inout === '入金') bankMap[t.account].in += t.amount;
+        else if (t.inout === '出金') bankMap[t.account].out += t.amount;
+      }
+    });
+
+    return {
+      cash: { in: cashIn, out: cashOut },
+      banks: Object.values(bankMap)
+    };
+  }
+
+  function renderBalanceManagement() {
+    const yearInput = document.getElementById('balance-year');
+    let year = parseInt(yearInput.value, 10);
+    if (!year) {
+      year = new Date().getFullYear();
+      yearInput.value = year;
+    }
+
+    const { cash, banks } = computeBalancesForYear(year);
+    const cashDisplay = document.getElementById('cash-balance-display');
+    const diff = cash.in - cash.out;
+    cashDisplay.textContent =
+      `対象年 ${year} の現金の動き：入金合計 ${formatYen(cash.in)}円　出金合計 ${formatYen(cash.out)}円　差額（入金−出金）${formatYen(diff)}円`;
+
+    const tbody = document.querySelector('#bank-table tbody');
+    tbody.innerHTML = '';
+    banks.forEach(b => {
+      const inc = b.in;
+      const out = b.out;
+      const delta = inc - out;
+      const end = b.initialBalance + delta;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${b.name}</td>
+        <td class="text-right">${formatYen(b.initialBalance)}</td>
+        <td class="text-right">${formatYen(inc)}</td>
+        <td class="text-right">${formatYen(out)}</td>
+        <td class="text-right">${formatYen(delta)}</td>
+        <td class="text-right">${formatYen(end)}</td>
+        <td class="no-print">
+          <button class="secondary btn-delete-bank" data-id="${b.id}">削除</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.btn-delete-bank').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (!confirm('この口座を削除しますか？（関連する取引の口座名はそのまま残ります）')) return;
+        appData.accounts.banks = appData.accounts.banks.filter(b => b.id !== id);
+        saveData();
+        refreshAccountSelects();
+        renderBalanceManagement();
+      });
+    });
+  }
+
+  // --- 取引 編集・削除ロジック ---
+  let editingTxId = null;
+
+  function startEditTransaction(id) {
+    const tx = appData.transactions.find(t => t.id === id);
+    if (!tx) return;
+    if (tx.isNonCash) {
+      alert('減価償却費などの自動仕訳は編集できません。');
+      return;
+    }
+    editingTxId = id;
+
+    document.getElementById('tx-date').value = tx.date;
+    document.getElementById('tx-inout').value = tx.inout || '入金';
+    refreshAccountSelects();
+    document.getElementById('tx-account').value = tx.account || '現金';
+    document.getElementById('tx-amount').value = tx.amount;
+    document.getElementById('tx-category').value = tx.category || '';
+    document.getElementById('tx-client').value = tx.client || '';
+    document.getElementById('tx-project').value = tx.projectId || '';
+    document.getElementById('tx-desc').value = tx.desc || '';
+
+    const msg = document.getElementById('tx-message');
+    msg.textContent = '編集モードです。この内容で上書き登録できます。';
+    msg.className = 'success';
+
+    document.getElementById('tx-submit-btn').textContent = 'この内容で上書き';
+    document.getElementById('tx-cancel-edit').style.display = 'inline-block';
+  }
+
+  function cancelEditTransaction() {
+    editingTxId = null;
+    document.getElementById('tx-date').value = todayISO();
+    document.getElementById('tx-inout').value = '入金';
+    refreshAccountSelects();
+    document.getElementById('tx-amount').value = '';
+    document.getElementById('tx-client').value = '';
+    document.getElementById('tx-project').value = '';
+    document.getElementById('tx-desc').value = '';
+
+    const msg = document.getElementById('tx-message');
+    msg.textContent = '';
+    msg.className = '';
+
+    document.getElementById('tx-submit-btn').textContent = 'この内容で登録';
+    document.getElementById('tx-cancel-edit').style.display = 'none';
+  }
+
+  function deleteTransaction(id) {
+    if (!confirm('この取引を削除しますか？')) return;
+    appData.transactions = appData.transactions.filter(t => t.id !== id);
+    saveData();
+    renderRecentTransactions();
+    renderJournal();
+    renderSummary();
+    renderProjects();
+    renderBalanceManagement();
+  }
+
+  // --- イベント登録 ---
+  function initEvents() {
+    // 入出金フォーム
+    document.getElementById('tx-date').value = todayISO();
+    document.getElementById('tr-date').value = todayISO();
+
+    document.getElementById('transaction-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const date = document.getElementById('tx-date').value;
+      const inout = document.getElementById('tx-inout').value;
+      const account = document.getElementById('tx-account').value;
+      const amount = parseInt(document.getElementById('tx-amount').value,10) || 0;
+      const category = document.getElementById('tx-category').value;
+      const client = document.getElementById('tx-client').value.trim();
+      const projectId = document.getElementById('tx-project').value || '';
+      const desc = document.getElementById('tx-desc').value.trim();
+      const msg = document.getElementById('tx-message');
+
+      if (!date || !amount || !category || !account) {
+        msg.textContent = '日付・金額・科目・口座は必須です。';
+        msg.className = 'error';
+        return;
+      }
+
+      if (client && !appData.masters.clients.includes(client)) {
+        appData.masters.clients.push(client);
+      }
+      if (desc && !appData.masters.descriptions.includes(desc)) {
+        appData.masters.descriptions.push(desc);
+      }
+
+      if (editingTxId) {
+        const tx = appData.transactions.find(t => t.id === editingTxId);
+        if (tx) {
+          tx.date = date;
+          tx.inout = inout;
+          tx.account = account;
+          tx.amount = amount;
+          tx.category = category;
+          tx.client = client;
+          tx.projectId = projectId;
+          tx.desc = desc;
+          tx.isNonCash = false;
+          tx.isTransfer = false;
+        }
+        editingTxId = null;
+        document.getElementById('tx-submit-btn').textContent = 'この内容で登録';
+        document.getElementById('tx-cancel-edit').style.display = 'none';
+        msg.textContent = '取引を更新しました。';
+        msg.className = 'success';
+      } else {
+        const tx = {
+          id: 'tx-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+          date, inout, account, amount, category, client, projectId, desc,
+          isNonCash: false,
+          isTransfer: false
+        };
+        appData.transactions.push(tx);
+        msg.textContent = '登録しました。';
+        msg.className = 'success';
+        document.getElementById('tx-amount').value = '';
+      }
+
+      saveData();
+      refreshMastersUI();
+      renderRecentTransactions();
+      renderJournal();
+      renderSummary();
+      renderProjects();
+      renderBalanceManagement();
+    });
+
+    document.getElementById('tx-cancel-edit').addEventListener('click', () => {
+      cancelEditTransaction();
+    });
+
+    // 資金振替フォーム
+    document.getElementById('transfer-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const date = document.getElementById('tr-date').value;
+      const from = document.getElementById('tr-from-account').value;
+      const to = document.getElementById('tr-to-account').value;
+      const amount = parseInt(document.getElementById('tr-amount').value, 10) || 0;
+      const descBase = document.getElementById('tr-desc').value.trim();
+      const msg = document.getElementById('tr-message');
+
+      if (!date || !from || !to || !amount) {
+        msg.textContent = '日付・口座・金額は必須です。';
+        msg.className = 'error';
+        return;
+      }
+      if (from === to) {
+        msg.textContent = '振替元と振替先は別の口座を選択してください。';
+        msg.className = 'error';
+        return;
+      }
+
+      const desc = descBase ? `資金振替：${from}→${to}（${descBase}）` : `資金振替：${from}→${to}`;
+
+      const txOut = {
+        id: 'tx-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+        date,
+        inout: '出金',
+        account: from,
+        amount,
+        category: '資金振替',
+        client: '',
+        projectId: '',
+        desc,
+        isNonCash: false,
+        isTransfer: true
+      };
+      const txIn = {
+        id: 'tx-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+        date,
+        inout: '入金',
+        account: to,
+        amount,
+        category: '資金振替',
+        client: '',
+        projectId: '',
+        desc,
+        isNonCash: false,
+        isTransfer: true
+      };
+
+      appData.transactions.push(txOut, txIn);
+      saveData();
+      msg.textContent = '資金振替を登録しました。';
+      msg.className = 'success';
+      document.getElementById('tr-amount').value = '';
+      document.getElementById('tr-desc').value = '';
+
+      renderRecentTransactions();
+      renderJournal();
+      renderSummary();
+      renderProjects();
+      renderBalanceManagement();
+    });
+
+    // 科目集計更新
+    document.getElementById('btn-recalc-summary').addEventListener('click', () => {
+      renderSummary();
+    });
+
+    // 工事登録
+    document.getElementById('project-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const client = document.getElementById('pj-client').value.trim();
+      const site = document.getElementById('pj-site').value.trim();
+      const amount = parseInt(document.getElementById('pj-amount').value, 10) || 0;
+      const msg = document.getElementById('pj-message');
+      if (!client || !site) {
+        msg.textContent = '取引先名と現場名は必須です。';
+        msg.className = 'error';
+        return;
+      }
+      const pj = {
+        id: 'pj-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+        client, site, contractAmount: amount
+      };
+      appData.projects.push(pj);
+
+      if (!appData.masters.clients.includes(client)) {
+        appData.masters.clients.push(client);
+      }
+
+      saveData();
+      refreshMastersUI();
+      refreshProjectSelectOnTx();
+      renderProjects();
+
+      msg.textContent = '工事を登録しました。';
+      msg.className = 'success';
+      document.getElementById('pj-client').value = '';
+      document.getElementById('pj-site').value = '';
+      document.getElementById('pj-amount').value = '';
+    });
+
+    // 固定資産：分類に応じて耐用年数を自動セット
+    document.getElementById('asset-type').addEventListener('change', e => {
+      const t = appData.assetTypes.find(a => a.name === e.target.value);
+      if (t) {
+        document.getElementById('asset-life').value = t.life;
+      }
+    });
+
+    // 固定資産登録
+    document.getElementById('asset-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const type = document.getElementById('asset-type').value;
+      const name = document.getElementById('asset-name').value.trim();
+      const date = document.getElementById('asset-date').value;
+      const cost = parseInt(document.getElementById('asset-cost').value,10) || 0;
+      let lifeYears = parseInt(document.getElementById('asset-life').value,10) || 0;
+      const isPool = document.getElementById('asset-pool').checked;
+      const msg = document.getElementById('asset-message');
+
+      if (!name || !date || !cost || !lifeYears) {
+        msg.textContent = '資産名・取得日・取得金額・耐用年数は必須です。';
+        msg.className = 'error';
+        return;
+      }
+
+      if (isPool) {
+        lifeYears = 3;
+      }
+
+      const asset = {
+        id: 'as-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+        type, name, date, cost, lifeYears, isPool
+      };
+      appData.assets.push(asset);
+      saveData();
+      renderAssets();
+
+      msg.textContent = '固定資産を登録しました。';
+      msg.className = 'success';
+      document.getElementById('asset-name').value = '';
+      document.getElementById('asset-date').value = '';
+      document.getElementById('asset-cost').value = '';
+      document.getElementById('asset-pool').checked = false;
+    });
+
+    // 固定資産：年変更
+    document.getElementById('btn-refresh-assets').addEventListener('click', e => {
+      e.preventDefault();
+      renderAssets();
+    });
+
+    // マスタ追加
+    document.getElementById('btn-add-master-client').addEventListener('click', () => {
+      const v = document.getElementById('master-client-input').value.trim();
+      if (v && !appData.masters.clients.includes(v)) {
+        appData.masters.clients.push(v);
+        saveData();
+        document.getElementById('master-client-input').value = '';
+        refreshMastersUI();
+      }
+    });
+    document.getElementById('btn-add-master-desc').addEventListener('click', () => {
+      const v = document.getElementById('master-desc-input').value.trim();
+      if (v && !appData.masters.descriptions.includes(v)) {
+        appData.masters.descriptions.push(v);
+        saveData();
+        document.getElementById('master-desc-input').value = '';
+        refreshMastersUI();
+      }
+    });
+
+    // 全データ削除
+    document.getElementById('btn-clear-all').addEventListener('click', () => {
+      if (!confirm('本当に全データを削除しますか？元に戻せません。')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      location.reload();
+    });
+
+    // 残高管理：年更新
+    document.getElementById('btn-refresh-balance').addEventListener('click', () => {
+      renderBalanceManagement();
+    });
+
+    // 預金口座登録
+    document.getElementById('bank-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const name = document.getElementById('bank-name').value.trim();
+      const init = parseInt(document.getElementById('bank-initial').value,10) || 0;
+      const msg = document.getElementById('bank-message');
+      if (!name) {
+        msg.textContent = '銀行名・口座名は必須です。';
+        msg.className = 'error';
+        return;
+      }
+      if (appData.accounts.banks.some(b => b.name === name)) {
+        msg.textContent = '同名の口座が既に登録されています。';
+        msg.className = 'error';
+        return;
+      }
+      appData.accounts.banks.push({
+        id: 'bank-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+        name,
+        initialBalance: init
+      });
+      saveData();
+      document.getElementById('bank-name').value = '';
+      document.getElementById('bank-initial').value = '';
+      msg.textContent = '口座を登録しました。';
+      msg.className = 'success';
+      refreshAccountSelects();
+      renderBalanceManagement();
+    });
+
+    // 仕訳一覧フィルタ
+    document.getElementById('journal-year').addEventListener('change', renderJournal);
+    document.getElementById('journal-month').addEventListener('change', renderJournal);
+    document.getElementById('journal-category').addEventListener('change', renderJournal);
+    document.getElementById('journal-keyword').addEventListener('input', () => {
+      renderJournal();
+    });
+    document.getElementById('btn-journal-clear').addEventListener('click', () => {
+      document.getElementById('journal-year').value = '';
+      document.getElementById('journal-month').value = '';
+      document.getElementById('journal-category').value = '';
+      document.getElementById('journal-keyword').value = '';
+      renderJournal();
+    });
+
+    // 印刷ボタン
+    document.getElementById('btn-print-journal').addEventListener('click', () => window.print());
+    document.getElementById('btn-print-summary').addEventListener('click', () => window.print());
+    document.getElementById('btn-print-projects').addEventListener('click', () => window.print());
+    document.getElementById('btn-print-assets').addEventListener('click', () => window.print());
+
+    // CSV出力ボタン
+    document.getElementById('btn-export-journal-csv').addEventListener('click', () => {
+      const data = getFilteredTransactionsForJournal();
+      const rows = [['日付','入出金区分','口座','科目','取引先','現場','摘要','金額','非現金','振替']];
+      data.forEach(t => {
+        rows.push([
+          t.date,
+          t.inout || '',
+          t.account || '',
+          t.category || '',
+          t.client || '',
+          getProjectLabel(t.projectId) || '',
+          t.desc || '',
+          t.amount,
+          t.isNonCash ? '1' : '0',
+          t.isTransfer ? '1' : '0'
+        ]);
+      });
+      downloadCSV('journal.csv', rows);
+    });
+
+    document.getElementById('btn-export-summary-csv').addEventListener('click', () => {
+      const year = parseInt(document.getElementById('sum-year').value,10) || new Date().getFullYear();
+      const rows = [['科目','入金合計','出金合計','事業割合(%)','事業経費']];
+      const tmpRatios = Object.assign({}, appData.businessRatios);
+
+      const rowsMap = {};
+      appData.categories.forEach(c => {
+        rowsMap[c.name] = { income: 0, expense: 0, type: c.type };
+        if (!tmpRatios.hasOwnProperty(c.name)) {
+          tmpRatios[c.name] = 100;
+        }
+      });
+
+      let incomeTotal = 0;
+      let expenseTotal = 0;
+
+      appData.transactions.forEach(t => {
+        if (!t.date || t.date.length < 4) return;
+        if (t.isTransfer) return;
+        const y = parseInt(t.date.slice(0,4),10);
+        if (y !== year) return;
+        const catMeta = getCategoryMeta(t.category);
+        if (!rowsMap[t.category]) {
+          rowsMap[t.category] = { income: 0, expense: 0, type: catMeta.type };
+          if (!tmpRatios.hasOwnProperty(t.category)) {
+            tmpRatios[t.category] = 100;
+          }
+        }
+        if (catMeta.type === 'income') {
+          rowsMap[t.category].income += t.amount;
+          incomeTotal += t.amount;
+        } else if (catMeta.type === 'expense') {
+          rowsMap[t.category].expense += t.amount;
+          expenseTotal += t.amount;
+        }
+      });
+
+      Object.keys(rowsMap).forEach(catName => {
+        const r = rowsMap[catName];
+        if (r.income === 0 && r.expense === 0) return;
+        const ratio = tmpRatios[catName] != null ? tmpRatios[catName] : 100;
+        const businessExpense = r.expense * (ratio / 100);
+        rows.push([
+          catName,
+          r.income,
+          r.expense,
+          ratio,
+          Math.round(businessExpense)
+        ]);
+      });
+
+      downloadCSV(`summary_${year}.csv`, rows);
+    });
+
+    document.getElementById('btn-export-projects-csv').addEventListener('click', () => {
+      const year = new Date().getFullYear();
+      const rows = [['取引先','現場','契約金額','入金累計','経費累計','粗利益']];
+      appData.projects.forEach(p => {
+        let incomeSum = 0;
+        let expenseSum = 0;
+        appData.transactions.forEach(t => {
+          if (t.projectId !== p.id) return;
+          const y = parseInt(t.date.slice(0,4), 10);
+          if (isNaN(y) || y !== year) return;
+          const catMeta = getCategoryMeta(t.category);
+          if (t.inout === '入金' && catMeta.type === 'income') {
+            incomeSum += t.amount;
+          } else if (t.inout === '出金' && catMeta.type === 'expense') {
+            expenseSum += t.amount;
+          }
+        });
+        const gross = incomeSum - expenseSum;
+        rows.push([
+          p.client,
+          p.site,
+          p.contractAmount,
+          incomeSum,
+          expenseSum,
+          gross
+        ]);
+      });
+      downloadCSV(`projects_${year}.csv`, rows);
+    });
+
+    document.getElementById('btn-export-assets-csv').addEventListener('click', () => {
+      const year = parseInt(document.getElementById('asset-year').value,10) || new Date().getFullYear();
+      const rows = [['資産分類','資産名','取得日','取得価額','耐用年数','今年度償却額','残高','一括償却資産']];
+      appData.assets.forEach(a => {
+        const { depThisYear, remaining } = calcAssetDepreciation(a, year);
+        rows.push([
+          a.type,
+          a.name,
+          a.date,
+          a.cost,
+          a.lifeYears,
+          Math.round(depThisYear),
+          Math.round(remaining),
+          a.isPool ? '1' : '0'
+        ]);
+      });
+      downloadCSV(`assets_${year}.csv`, rows);
+    });
+
+    // 初期の年設定
+    const nowYear = new Date().getFullYear();
+    document.getElementById('sum-year').value = nowYear;
+    document.getElementById('asset-year').value = nowYear;
+    document.getElementById('balance-year').value = nowYear;
+    document.getElementById('journal-year').value = '';
+  }
+
+  // --- 初期化 ---
+  (function init() {
+    loadData();
+    // 減価償却 自動計上（前年分）
+    autoDepreciatePreviousYearIfNeeded();
+
+    initCategorySelect();
+    initAssetTypeSelect();
+    refreshAccountSelects();
+    refreshMastersUI();
+    refreshProjectSelectOnTx();
+    initEvents();
+    renderRecentTransactions();
+    renderJournal();
+    renderSummary();
+    renderProjects();
+    renderAssets();
+    renderBalanceManagement();
+
+    const firstType = document.getElementById('asset-type').value;
+    const t = appData.assetTypes.find(a => a.name === firstType);
+    if (t) document.getElementById('asset-life').value = t.life;
+  })();
+</script>
+</body>
+</html>
+
